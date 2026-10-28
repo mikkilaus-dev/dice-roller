@@ -131,8 +131,8 @@
 
   .actions { display: flex; flex-wrap: wrap; gap: 8px; }
   .actions button { flex: 1 1 140px; padding: 12px 8px; font-weight: 700; }
-  #lethal { display: flex; flex-wrap: wrap; gap: 10px; min-height: 36px; align-items: center; }
-  #lethal .none { color: var(--muted); font-size: .9rem; }
+  #lethal, #devastating { display: flex; flex-wrap: wrap; gap: 10px; min-height: 36px; align-items: center; }
+  #lethal .none, #devastating .none { color: var(--muted); font-size: .9rem; }
   .count { float: right; color: var(--text); font-family: var(--serif); font-size: 1rem; font-weight: 700; }
   section { display: flex; flex-direction: column; gap: 12px; }
 </style>
@@ -192,6 +192,7 @@
         </div>
 
         <button class="big" id="toWound" disabled>Continue to wound phase →</button>
+        <button id="newHit" disabled>New attack</button>
       </section>
 
       <!-- WOUND PHASE -->
@@ -211,6 +212,12 @@
         <div class="actions">
           <button id="rerollWoundOnesBtn">Reroll 1s</button>
           <button id="rerollWoundMissBtn">Reroll misses</button>
+          <button id="devBtn" style="flex-basis:100%">Devastating wounds</button>
+        </div>
+
+        <div class="card">
+          <span class="label">Devastating wounds <span class="count" id="devCount">0</span></span>
+          <div id="devastating"></div>
         </div>
 
         <div class="actions">
@@ -227,7 +234,7 @@
   let sides = 6, count = 2, hitOn = 3, woundOn = 4, phase = 1;
   // dice: {v, bonus, used}; "used" means this 6 was already spent on a lethal/sustained hit
   let dice = [], lethal = [], rolled = false, rolling = false;
-  let woundDice = [], woundRolled = false, hitsCarried = 0;
+  let woundDice = [], woundRolled = false, hitsCarried = 0, devastating = [];
   const $ = id => document.getElementById(id);
 
   // an unmodified 1 always fails, an unmodified 6 always succeeds
@@ -987,7 +994,8 @@
     lethal.forEach(v => $('lethal').appendChild(mkFlatDie(v)));
     $('lethalCount').textContent = lethal.length;
 
-    $('roll').disabled = rolling;
+    $('roll').disabled = rolling || rolled;   // one hit roll per attack: rerolls cover the rest
+    $('newHit').disabled = rolling || !rolled;
     ['lethalBtn', 'sustainedBtn', 'bothBtn', 'toWound'].forEach(id => $(id).disabled = !can);
     const ones = dice.filter(isRerollOne).length, misses = dice.filter(isRerollMiss).length;
     $('rerollBtn').disabled = !can || !ones;
@@ -997,7 +1005,7 @@
   }
 
   async function roll() {
-    if (rolling) return;
+    if (rolling || rolled) return;
     rolling = true; rolled = false;
     lethal = [];
     dice = Array.from({ length: count }, () => ({ v: 0, bonus: false, used: false }));
@@ -1085,15 +1093,24 @@
     if (woundRolled && !rolling) {
       woundTray.restyle(woundDice, woundClass);
       const rolledWounds = woundDice.filter(d => success(d.v, woundOn)).length;
-      const total = rolledWounds + auto;
+      const dev = devastating.length;
+      const total = rolledWounds + auto + dev;
       $('woundTotal').innerHTML =
         `${total} wound${total === 1 ? '' : 's'}<small>${rolledWounds} rolled on ${woundOn}+` +
-        (auto ? ` + ${auto} lethal` : '') + `</small>`;
+        (auto ? ` + ${auto} lethal` : '') + (dev ? ` + ${dev} devastating` : '') + `</small>` +
+        (dev ? `<small>${total - dev} can be saved · ${dev} devastating (no save)</small>` : '');
     } else {
       $('woundTotal').innerHTML = rolling ? '<small>rolling…</small>' : '';
     }
-    ['rollWound', 'back', 'again'].forEach(id => $(id).disabled = rolling);
+    ['back', 'again'].forEach(id => $(id).disabled = rolling);
+    $('rollWound').disabled = rolling || woundRolled;   // one wound roll per attack: rerolls cover the rest
+    $('devastating').innerHTML = devastating.length ? '' : '<span class="none">No devastating wounds yet</span>';
+    devastating.forEach(v => $('devastating').appendChild(mkFlatDie(v)));
+    $('devCount').textContent = devastating.length;
     const can = woundRolled && !rolling;
+    const sixes = woundDice.filter(d => d.v === 6).length;
+    $('devBtn').disabled = !can || !sixes;
+    $('devBtn').textContent = can && sixes ? `Devastating wounds (${sixes})` : 'Devastating wounds';
     const ones = woundDice.filter(isWoundOne).length, misses = woundDice.filter(isWoundMiss).length;
     $('rerollWoundOnesBtn').disabled = !can || !ones;
     $('rerollWoundOnesBtn').textContent = can && ones ? `Reroll 1s (${ones})` : 'Reroll 1s';
@@ -1109,9 +1126,22 @@
     await rerollIn(woundTray, woundDice, 6, pick, drawWound);
   }
 
+  // Devastating wounds: every 6 to wound becomes a mortal wound. It leaves the tray for the card below,
+  // and cannot be saved.
+  function devastatingWounds() {
+    if (rolling || !woundRolled) return;
+    const sixes = woundDice.filter(d => d.v === 6);
+    if (!sixes.length) return;
+    sixes.forEach(d => { devastating.push(d.v); woundTray.remove(d); });
+    woundDice = woundDice.filter(d => !sixes.includes(d));
+    woundTray.sortDice(woundDice);
+    drawWound();
+  }
+
   async function rollWounds() {
-    if (rolling) return;
+    if (rolling || woundRolled) return;
     rolling = true; woundRolled = false;
+    devastating = [];
     woundDice = Array.from({ length: hitsCarried }, () => ({ v: 0 }));
     drawWound();
     await woundTray.throwDice(woundDice, 6);
@@ -1124,6 +1154,7 @@
     if (!rolled || rolling) return;
     hitsCarried = dice.filter(d => success(d.v, hitOn)).length;
     woundDice = [];
+    devastating = [];
     woundRolled = false;
     showPhase(2);
     woundTray.clear();
@@ -1132,7 +1163,7 @@
 
   function newAttack() {
     dice = []; lethal = []; rolled = false;
-    woundDice = []; woundRolled = false;
+    woundDice = []; devastating = []; woundRolled = false;
     hitTray.clear();
     if (woundTray) woundTray.clear();
     showPhase(1);
@@ -1143,6 +1174,7 @@
   $('roll').onclick = roll;
   $('rerollBtn').onclick = rerollOnes;
   $('rerollMissBtn').onclick = rerollMisses;
+  $('devBtn').onclick = devastatingWounds;
   $('rerollWoundOnesBtn').onclick = () => rerollWoundDice(isWoundOne);
   $('rerollWoundMissBtn').onclick = () => rerollWoundDice(isWoundMiss);
   $('lethalBtn').onclick = lethalHits;
@@ -1152,6 +1184,7 @@
   $('rollWound').onclick = rollWounds;
   $('back').onclick = () => { showPhase(1); drawHit(); };
   $('again').onclick = newAttack;
+  $('newHit').onclick = () => { if (!rolling) newAttack(); };
 
   document.addEventListener('keydown', e => {
     if (e.code === 'Space' && !['BUTTON', 'INPUT'].includes(document.activeElement.tagName)) {
