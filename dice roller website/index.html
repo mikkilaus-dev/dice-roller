@@ -1,0 +1,1167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dice Roller</title>
+<style>
+  /* palette taken from the tray: dark walnut, brass, ivory (the dice) and green felt */
+  :root {
+    --bg: #130e09; --text: #f3e9d2; --muted: #b9a37f; --brass: #d9aa52; --brass-dark: #a97a26;
+    --wood-hi: #4d331a; --wood: #3a2613; --wood-lo: #2c1c0e; --wood-line: #5e3d1e;
+    --felt: #1f6d46; --felt-hi: #2f8a5b; --felt-dark: #0f3d28;
+    --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text); padding: 16px;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    /* a dark wooden table: soft light from the top left plus very faint grain */
+    background:
+      repeating-linear-gradient(90deg, rgba(255,210,150,.015) 0 2px, rgba(0,0,0,.02) 2px 9px),
+      radial-gradient(ellipse at 25% 15%, #2b1c0f 0%, #17100a 55%, #0e0906 100%);
+    background-attachment: fixed;
+  }
+
+  /* tray on the left, controls on the right */
+  .app { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; max-width: 1500px; margin: 0 auto; }
+  .stage { position: sticky; top: 16px; width: min(100%, calc((100vh - 32px) * 1.47)); }
+  .panel { display: flex; flex-direction: column; gap: 12px; }
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; }
+    .stage { position: static; width: 100%; }
+  }
+
+  /* dark leather panels with a thin brass edge, so they stand out from the wood */
+  .card {
+    border: 1px solid rgba(217,170,82,.32); border-radius: 14px; padding: 16px;
+    background: linear-gradient(180deg, #25190e 0%, #1a110a 100%);
+    box-shadow: inset 0 1px 0 rgba(255,225,180,.07), inset 0 0 22px rgba(0,0,0,.35), 0 8px 18px rgba(0,0,0,.55);
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .label {
+    color: var(--brass); font-size: .72rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .12em; margin-bottom: 8px; display: block;
+  }
+  .field + .field { margin-top: 14px; }
+
+  button {
+    font: inherit; cursor: pointer; border-radius: 10px; padding: 8px 12px; color: var(--text);
+    border: 1px solid var(--wood-line);
+    background: linear-gradient(180deg, var(--wood-hi), #3b2512);
+    box-shadow: inset 0 1px 0 rgba(255,225,180,.14), 0 2px 4px rgba(0,0,0,.4);
+    transition: border-color .12s, transform .05s;
+  }
+  button:hover:not(:disabled) { border-color: var(--brass); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  /* selected = green felt */
+  button.sel {
+    background: linear-gradient(180deg, var(--felt-hi), var(--felt)); border-color: #55b383; font-weight: 700;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 2px 4px rgba(0,0,0,.4);
+  }
+
+  .stepper { display: inline-flex; align-items: center; gap: 10px; }
+  .stepper button { width: 36px; height: 36px; padding: 0; font-size: 1.2rem; }
+  .stepper input {
+    width: 68px; height: 36px; text-align: center; font-family: var(--serif); font-size: 1.3rem; font-weight: 700;
+    color: var(--text); background: #1a110a; border: 1px solid var(--wood-line); border-radius: 10px; -moz-appearance: textfield;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,.6);
+  }
+  .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  /* the main buttons are brass */
+  .big {
+    width: 100%; padding: 14px; font-size: 1.05rem; font-weight: 700; letter-spacing: .03em; color: #2b1b08;
+    background: linear-gradient(180deg, #f0cb7c 0%, var(--brass) 45%, var(--brass-dark) 100%);
+    border: 1px solid #f3d899;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45), inset 0 -2px 0 rgba(90,55,10,.35), 0 4px 10px rgba(0,0,0,.5);
+  }
+  .big:hover:not(:disabled) { border-color: #fff0c4; filter: brightness(1.06); }
+
+  /* phase tabs */
+  .phases { display: flex; gap: 8px; }
+  .phases div {
+    flex: 1; text-align: center; padding: 9px 8px; border-radius: 10px; font-weight: 600; font-size: .85rem;
+    color: var(--muted); border: 1px solid rgba(217,170,82,.28);
+    background: linear-gradient(180deg, #25190e, #1a110a);
+    box-shadow: inset 0 2px 5px rgba(0,0,0,.4), 0 4px 10px rgba(0,0,0,.4);
+  }
+  .phases div.on {
+    color: var(--text); border-color: #55b383;
+    background: linear-gradient(180deg, var(--felt-hi), var(--felt));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.25), 0 2px 4px rgba(0,0,0,.4);
+  }
+
+  /* dice tray: a canvas with real 3D dice and physics, seen from above */
+  .tray {
+    position: relative; width: 100%; overflow: hidden; border-radius: 16px;
+    background: #0b1f15;
+    box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  }
+  .tray canvas { display: block; width: 100%; height: auto; }
+  .tray.empty::after {
+    content: attr(data-empty); position: absolute; inset: 0; display: grid; place-items: center;
+    color: rgba(255,255,255,.35); font-size: 1.1rem; pointer-events: none;
+  }
+
+  /* flat dice, used in the lethal hits card */
+  .die {
+    --s: 34px; width: var(--s); height: var(--s); border-radius: 20%; padding: calc(var(--s) * .17);
+    display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr);
+    background: linear-gradient(145deg, #ffe08c, #e0a020);
+    box-shadow: inset -2px -3px 4px rgba(0,0,0,.2), inset 2px 2px 3px rgba(255,255,255,.7), 2px 4px 6px rgba(0,0,0,.5);
+  }
+  .die i { place-self: center; width: 78%; aspect-ratio: 1; border-radius: 50%; }
+  .die i.on { background: radial-gradient(circle at 35% 30%, #4a4a4a, #050505); }
+
+  /* the result sits on a little patch of felt, like a scoreboard */
+  .card:has(> .total) {
+    background:
+      radial-gradient(ellipse at center, rgba(120,200,150,.12), transparent 70%),
+      linear-gradient(180deg, var(--felt), var(--felt-dark));
+    border-color: rgba(217,170,82,.32);
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,.25), inset 0 6px 18px rgba(0,0,0,.45), 0 8px 18px rgba(0,0,0,.55);
+  }
+  .total { text-align: center; font-family: var(--serif); font-size: 2.6rem; font-weight: 700; min-height: 3.4rem; line-height: 1.2; text-shadow: 0 2px 4px rgba(0,0,0,.5); }
+  .total small { display: block; font-family: system-ui, sans-serif; font-size: .8rem; font-weight: 400; color: rgba(243,233,210,.7); text-shadow: none; }
+  .hint { text-align: center; color: var(--muted); margin: 0 0 12px; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .actions button { flex: 1 1 140px; padding: 12px 8px; font-weight: 700; }
+  #lethal { display: flex; flex-wrap: wrap; gap: 10px; min-height: 36px; align-items: center; }
+  #lethal .none { color: var(--muted); font-size: .9rem; }
+  .count { float: right; color: var(--text); font-family: var(--serif); font-size: 1rem; font-weight: 700; }
+  section { display: flex; flex-direction: column; gap: 12px; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <!-- ============ DICE TRAY (left) ============ -->
+    <main class="stage">
+      <div class="tray empty" id="dice" data-empty="Roll to throw the dice"></div>
+      <div class="tray empty" id="woundDice" data-empty="Roll to throw the dice" hidden></div>
+    </main>
+
+    <!-- ============ CONTROLS (right) ============ -->
+    <aside class="panel">
+
+      <div class="phases">
+        <div id="pill1" class="on">1 · Hit phase</div>
+        <div id="pill2">2 · Wound phase</div>
+      </div>
+
+      <!-- HIT PHASE -->
+      <section id="phase1">
+        <div class="card">
+          <div class="field">
+            <span class="label">Die type</span>
+            <div class="row" id="types"></div>
+          </div>
+          <div class="field">
+            <span class="label">Number of dice</span>
+            <div class="stepper">
+              <button id="minus" aria-label="Fewer dice">−</button>
+              <input type="number" id="count" min="1" max="60" value="2" inputmode="numeric" aria-label="Number of dice">
+              <button id="plus" aria-label="More dice">+</button>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">Hit on</span>
+            <div class="row" id="hitOn"></div>
+          </div>
+        </div>
+
+        <button class="big" id="roll">Roll to hit</button>
+
+        <div class="card"><div class="total" id="total"></div></div>
+
+        <div class="actions">
+          <button id="rerollBtn">Reroll 1s</button>
+          <button id="rerollMissBtn">Reroll misses</button>
+          <button id="lethalBtn">Lethal hits</button>
+          <button id="sustainedBtn">Sustained hits</button>
+          <button id="bothBtn">Lethals + sustained</button>
+        </div>
+
+        <div class="card">
+          <span class="label">Lethal hits <span class="count" id="lethalCount">0</span></span>
+          <div id="lethal"></div>
+        </div>
+
+        <button class="big" id="toWound" disabled>Continue to wound phase →</button>
+      </section>
+
+      <!-- WOUND PHASE -->
+      <section id="phase2" hidden>
+        <div class="card">
+          <p class="hint" id="woundSummary"></p>
+          <div class="field">
+            <span class="label">Wound on</span>
+            <div class="row" id="woundOn"></div>
+          </div>
+        </div>
+
+        <button class="big" id="rollWound">Roll to wound</button>
+
+        <div class="card"><div class="total" id="woundTotal"></div></div>
+
+        <div class="actions">
+          <button id="rerollWoundOnesBtn">Reroll 1s</button>
+          <button id="rerollWoundMissBtn">Reroll misses</button>
+        </div>
+
+        <div class="actions">
+          <button id="back">← Back to hit phase</button>
+          <button id="again">New attack</button>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  const SIDES = [3, 6];
+  let sides = 6, count = 2, hitOn = 3, woundOn = 4, phase = 1;
+  // dice: {v, bonus, used}; "used" means this 6 was already spent on a lethal/sustained hit
+  let dice = [], lethal = [], rolled = false, rolling = false;
+  let woundDice = [], woundRolled = false, hitsCarried = 0;
+  const $ = id => document.getElementById(id);
+
+  // an unmodified 1 always fails, an unmodified 6 always succeeds
+  const success = (v, target) => v !== 1 && (v === 6 || v >= target);
+
+  // pip positions on a 3x3 grid
+  const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+
+  // flat die for the lethal hits card
+  const mkFlatDie = v => {
+    const el = document.createElement('div');
+    el.className = 'die';
+    el.innerHTML = Array.from({ length: 9 }, (_, i) => `<i${PIPS[v].includes(i) ? ' class="on"' : ''}></i>`).join('');
+    return el;
+  };
+
+  // =====================================================================
+  //  3D dice tray: three.js for drawing, Rapier (WASM) for the physics.
+  //  Dice are really thrown; the number you get is whichever face lands up.
+  //
+  //  Why it is set up this way:
+  //  - Rapier instead of cannon.js: a modern solver with proper box-box contact manifolds, soft contacts
+  //    and CCD, so resting dice stay still instead of jittering, and 60 dice cost about a millisecond a frame.
+  //  - True scale: a world unit is 2.2 cm, so a die (0.72 units) is a 16 mm die, gravity is 9.81 m/s²
+  //    expressed in those units and the throw is a real toss into a tray (about 1 m/s, released a few cm up). Nothing is "tuned by feel".
+  //  - A fixed 240 Hz step, run from an accumulator, so a small fast die is well resolved and the motion
+  //    looks the same at any frame rate. All timing (rest, deadline) is in simulated seconds.
+  //  - Real-speed 16 mm dice are over almost before you can follow them, so the clock runs PACE times
+  //    slower. That slows the whole roll evenly without changing a single trajectory.
+  //  - Materials: felt grips and hardly bounces, the wooden rim is slick and lively, and dice slide off
+  //    each other (low die-die friction) rather than propping each other up.
+  //  - A die that has come to rest flat is put to sleep, which removes any leftover micro-motion.
+  //  - A real die can come to rest leaning on or lying on another, so no engine can rule that out. Instead of
+  //    per-frame nudges there is one final pass (tidy) that glides each such die, flat on the face it shows,
+  //    to the nearest free spot. It also catches any die still moving at the deadline.
+  // =====================================================================
+  const RAPIER = import('https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs')
+    .then(async m => { await m.default.init(); return m.default; });
+
+  const FLOOR_W = 16, FLOOR_D = 10;
+  const DS = 0.72;           // die size in world units
+  const RADIUS = 0.02;      // how rounded the edges look (visual only)
+  const UNIT = 0.016 / DS;   // metres per world unit (a 16 mm die)
+  const G = 9.81 / UNIT;     // real gravity in world units/s² (~441)
+  const STEP = 1 / 240;      // physics timestep
+  const PACE = 1.5;          // the roll plays this many times slower than real time (1 = real speed)
+  const REST_TIME = 0.1;     // a die slower than the limits below for this long (sim seconds) is at rest
+  const REST_LIN = 0.25, REST_ANG = 0.6;   // units/s (~5 mm/s), rad/s
+  const MAX_ROLL = 1.6;      // sim seconds before the tidy pass takes over whatever is still moving
+  const FLAT = Math.cos(2 * Math.PI / 180);   // a face within 2° of straight up counts as flat
+  const CLEAR = 0.06;        // smallest gap allowed between resting dice (~1.3 mm)
+  // face values in BoxGeometry face order: +x, -x, +y, -y, +z, -z (a d3 is a d6 marked 1,1,2,2,3,3)
+  const FACE_VALUES = { 6: [1, 6, 2, 5, 3, 4], 3: [1, 1, 2, 2, 3, 3] };
+  const FACE_AXES = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+    .map(a => new THREE.Vector3(...a));
+  const UP = new THREE.Vector3(0, 1, 0);
+  const texCache = {};
+
+  // a cube with rounded edges: push every vertex out from the inner cube by RADIUS
+  function roundedBoxGeometry(size, radius, seg) {
+    const g = new THREE.BoxGeometry(size, size, size, seg, seg, seg);
+    const pos = g.attributes.position, nor = g.attributes.normal;
+    const h = size / 2 - radius, v = new THREE.Vector3(), inner = new THREE.Vector3(), n = new THREE.Vector3();
+    const clamp = x => Math.max(-h, Math.min(h, x));
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      inner.set(clamp(v.x), clamp(v.y), clamp(v.z));
+      n.subVectors(v, inner).normalize();
+      v.copy(inner).addScaledVector(n, radius);
+      pos.setXYZ(i, v.x, v.y, v.z);
+      nor.setXYZ(i, n.x, n.y, n.z);
+    }
+    return g;
+  }
+  const DIE_GEO = roundedBoxGeometry(DS, RADIUS, 16);
+
+  function faceTexture(v) {
+    if (texCache[v]) return texCache[v];
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = '#f6f1e1';
+    g.fillRect(0, 0, 128, 128);
+    const edge = g.createRadialGradient(64, 64, 50, 64, 64, 92);
+    edge.addColorStop(0, 'rgba(0,0,0,0)');
+    edge.addColorStop(1, 'rgba(0,0,0,.18)');
+    g.fillStyle = edge;
+    g.fillRect(0, 0, 128, 128);
+    g.fillStyle = v === 1 ? '#b3121f' : '#101010';
+    PIPS[v].forEach(i => {
+      g.beginPath();
+      g.arc(32 + (i % 3) * 32, 32 + Math.floor(i / 3) * 32, v === 1 ? 16 : 11, 0, Math.PI * 2);
+      g.fill();
+    });
+    const t = new THREE.CanvasTexture(c);
+    t.encoding = THREE.sRGBEncoding;
+    t.anisotropy = 4;
+    return texCache[v] = t;
+  }
+
+  // which face points most nearly up: {k: face index, y: how straight up it points (1 = flat)}
+  function upFace(q) {
+    let k = 0, y = -2;
+    FACE_AXES.forEach((a, i) => { const ay = a.clone().applyQuaternion(q).y; if (ay > y) { y = ay; k = i; } });
+    return { k, y };
+  }
+
+  // the same orientation turned the least amount needed to lie exactly flat on its up face
+  function flattened(q) {
+    const f = FACE_AXES[upFace(q).k].clone().applyQuaternion(q);
+    return new THREE.Quaternion().setFromUnitVectors(f, UP).multiply(q);
+  }
+
+  // gap between two dice lying flat, from their square footprints (separating axis test; < 0 = overlap)
+  function footprintGap(a, b) {
+    const sides = q => [0, 2, 4].map(k => FACE_AXES[k].clone().applyQuaternion(q))
+      .filter(v => Math.abs(v.y) < 0.5).map(v => { const l = Math.hypot(v.x, v.z); return [v.x / l, v.z / l]; });
+    const sa = sides(a.quaternion), sb = sides(b.quaternion);
+    const dx = b.position.x - a.position.x, dz = b.position.z - a.position.z;
+    const half = (s, u) => s.reduce((r, v) => r + Math.abs(v[0] * u[0] + v[1] * u[1]), 0) * DS / 2;
+    return Math.max(...[...sa, ...sb].map(u => Math.abs(dx * u[0] + dz * u[1]) - half(sa, u) - half(sb, u)));
+  }
+
+  // a uniformly random orientation
+  function randomQuat() {
+    const u1 = Math.random(), u2 = Math.random() * Math.PI * 2, u3 = Math.random() * Math.PI * 2;
+    const a = Math.sqrt(1 - u1), b = Math.sqrt(u1);
+    return { x: a * Math.sin(u2), y: a * Math.cos(u2), z: b * Math.sin(u3), w: b * Math.cos(u3) };
+  }
+
+  // ---- tray looks (visual only) ----
+  const RIM = 1.4, RIM_H = 1.6;                       // width / height of the raised wooden rim
+  const VIEW_W = FLOOR_W + 2 * RIM, VIEW_D = FLOOR_D + 2 * RIM;
+
+  // felt: grainy base colour, tiny fibres and soft cloudy patches (also used as a bump map)
+  function feltTexture() {
+    const S = 1024, c = document.createElement('canvas');
+    c.width = c.height = S;
+    const g = c.getContext('2d');
+    g.fillStyle = '#1f6d46';
+    g.fillRect(0, 0, S, S);
+    const img = g.getImageData(0, 0, S, S), d = img.data;
+    for (let i = 0; i < d.length; i += 4) {           // grain
+      const n = (Math.random() - 0.5) * 38;
+      d[i] += n * 0.55; d[i + 1] += n; d[i + 2] += n * 0.7;
+    }
+    g.putImageData(img, 0, 0);
+    g.lineWidth = 1;
+    for (let i = 0; i < 40000; i++) {                 // fibres (wrapped across the tile edge)
+      const x = Math.random() * S, y = Math.random() * S, a = Math.random() * Math.PI * 2, l = 2 + Math.random() * 6;
+      g.strokeStyle = Math.random() < 0.5 ? 'rgba(190,255,215,.09)' : 'rgba(0,20,8,.14)';
+      const near = x < 8 || y < 8 || x > S - 8 || y > S - 8;
+      for (let ox = near ? -S : 0; ox <= (near ? S : 0); ox += S) for (let oy = near ? -S : 0; oy <= (near ? S : 0); oy += S) {
+        g.beginPath(); g.moveTo(x + ox, y + oy); g.lineTo(x + ox + Math.cos(a) * l, y + oy + Math.sin(a) * l); g.stroke();
+      }
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set((FLOOR_W + 2) / 12, (FLOOR_D + 2) / 12);
+    t.anisotropy = 4;
+    t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+
+  // wood for the rim: a clean, smooth walnut finish with a few long, soft grain lines; tiles seamlessly
+  const WOOD_U = 9, WOOD_V = 2.4;   // world units covered by one texture tile (along the grain / across it)
+  function woodCanvas(dark) {
+    const W = 1024, H = 256, TAU = Math.PI * 2, STEP = 8;   // STEP divides W, so lines reach both edges
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const base = g.createLinearGradient(0, 0, 0, H);
+    if (dark) { base.addColorStop(0, '#3b2615'); base.addColorStop(0.5, '#452c18'); base.addColorStop(1, '#36230f'); }
+    else { base.addColorStop(0, '#6a4426'); base.addColorStop(0.5, '#774e2c'); base.addColorStop(1, '#673f23'); }
+    g.fillStyle = base;
+    g.fillRect(0, 0, W, H);
+    const wave = (y, k, ph, amp) => {
+      for (const oy of [-H, 0, H]) {
+        g.beginPath();
+        for (let x = 0; x <= W; x += STEP) g.lineTo(x, y + oy + Math.sin(TAU * k * x / W + ph) * amp);
+        g.stroke();
+      }
+    };
+    for (let i = 0; i < 12; i++) {             // broad soft tone changes
+      g.strokeStyle = Math.random() < 0.5 ? 'rgba(30,12,2,.14)' : 'rgba(225,170,115,.12)';
+      g.lineWidth = rnd(16, 38);
+      wave(rnd(0, H), 1, rnd(0, TAU), rnd(5, 12));
+    }
+    for (let i = 0; i < 48; i++) {             // clear, long grain lines
+      g.strokeStyle = Math.random() < 0.7 ? `rgba(38,16,3,${rnd(0.14, 0.28)})` : `rgba(230,175,120,${rnd(0.09, 0.18)})`;
+      g.lineWidth = rnd(1.5, 4);
+      wave(rnd(0, H), 1 + Math.floor(Math.random() * 2), rnd(0, TAU), rnd(4, 12));
+    }
+    for (let i = 0; i < 60; i++) {             // fine lines between them
+      g.strokeStyle = `rgba(35,14,2,${rnd(0.07, 0.14)})`;
+      g.lineWidth = rnd(0.8, 1.3);
+      wave(rnd(0, H), 2 + Math.floor(Math.random() * 3), rnd(0, TAU), rnd(2, 7));
+    }
+    return c;
+  }
+  function woodTexture() {
+    const t = new THREE.CanvasTexture(woodCanvas(false));
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    t.encoding = THREE.sRGBEncoding;
+    return t;
+  }
+
+  // the page itself is a table made of the same wood, only darker
+  (() => {
+    const url = woodCanvas(true).toDataURL('image/jpeg', 0.9);
+    document.body.style.background =
+      `radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 35%, rgba(0,0,0,.6) 100%), ` +
+      `linear-gradient(rgba(0,0,0,.2), rgba(0,0,0,.2)), url(${url}) 0 0 / 1536px 384px repeat`;
+    document.body.style.backgroundAttachment = 'fixed';
+  })();
+
+  // normal map for the wood: a height field of fine grain, pores and a little roughness, turned into surface normals
+  function woodNormalTexture() {
+    const W = 1024, H = 256, TAU = Math.PI * 2, STEP = 8, STRENGTH = 2.2;
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    g.fillStyle = '#808080';
+    g.fillRect(0, 0, W, H);
+    const wave = (y, k, ph, amp) => {
+      g.beginPath();
+      for (let x = 0; x <= W; x += STEP) g.lineTo(x, y + Math.sin(TAU * k * x / W + ph) * amp);
+      g.stroke();
+    };
+    for (let i = 0; i < 520; i++) {                      // fine grain: thin raised and sunken lines along the board
+      const k = 1 + Math.floor(Math.random() * 3);
+      g.strokeStyle = Math.random() < 0.5 ? `rgba(0,0,0,${rnd(0.15, 0.45)})` : `rgba(255,255,255,${rnd(0.15, 0.4)})`;
+      g.lineWidth = rnd(0.8, 2.2);
+      wave(rnd(-4, H + 4), k, rnd(0, TAU), rnd(2, 10));
+    }
+    for (let i = 0; i < 1400; i++) {                     // pores: tiny dents
+      g.fillStyle = `rgba(0,0,0,${rnd(0.2, 0.5)})`;
+      g.fillRect(rnd(0, W), rnd(0, H), rnd(2, 10), rnd(1, 2));
+    }
+    const src = g.getImageData(0, 0, W, H).data;
+    const hAt = (x, y) => src[(((y + H) % H) * W + ((x + W) % W)) * 4] / 255;   // wraps, so the map tiles
+    const out = g.createImageData(W, H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        let nx = (hAt(x - 1, y) - hAt(x + 1, y)) * STRENGTH;
+        let ny = (hAt(x, y + 1) - hAt(x, y - 1)) * STRENGTH;
+        const inv = 1 / Math.hypot(nx, ny, 1);
+        nx *= inv; ny *= inv;
+        const i = (y * W + x) * 4;
+        out.data[i] = (nx * 0.5 + 0.5) * 255;
+        out.data[i + 1] = (ny * 0.5 + 0.5) * 255;
+        out.data[i + 2] = (inv * 0.5 + 0.5) * 255;
+        out.data[i + 3] = 255;
+      }
+    }
+    g.putImageData(out, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.anisotropy = 8;
+    return t;
+  }
+
+  // the whole rim as one frame with small chamfers on every edge; UVs are in world units so the grain follows each side
+  function rimGeometry() {
+    const bs = 0.09;                                     // chamfer size
+    const ow = FLOOR_W / 2 + RIM, od = FLOOR_D / 2 + RIM;
+    const iw = FLOOR_W / 2 + bs, id = FLOOR_D / 2 + bs;  // the bevel eats into the hole, so start a little wider
+    const shape = new THREE.Shape();
+    shape.moveTo(-ow, -od); shape.lineTo(ow, -od); shape.lineTo(ow, od); shape.lineTo(-ow, od); shape.lineTo(-ow, -od);
+    const hole = new THREE.Path();
+    hole.moveTo(-iw, -id); hole.lineTo(-iw, id); hole.lineTo(iw, id); hole.lineTo(iw, -id); hole.lineTo(-iw, -id);
+    shape.holes.push(hole);
+    const geo = new THREE.ExtrudeGeometry(shape, {
+      depth: RIM_H - 2 * bs, bevelEnabled: true, bevelThickness: bs, bevelSize: bs, bevelSegments: 2, curveSegments: 1,
+    });
+    geo.rotateX(-Math.PI / 2);
+    geo.translate(0, bs, 0);
+    return geo;
+  }
+
+  class Tray {
+    constructor(el) {
+      this.el = el;
+      this.items = new Map();   // die object -> {mesh, body, vals, rest}
+      this.running = false;
+      this.sortToken = 0;
+      this.lastWidth = 0;
+
+      const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      r.outputEncoding = THREE.sRGBEncoding;
+      r.shadowMap.enabled = true;
+      el.appendChild(r.domElement);
+
+      // straight-down camera that frames the whole floor
+      const fov = 36;
+      this.scene = new THREE.Scene();
+      this.camera = new THREE.PerspectiveCamera(fov, VIEW_W / VIEW_D, 0.1, 100);
+      this.camera.up.set(0, 0, -1);
+      this.camera.position.set(0, (VIEW_D / 2) / Math.tan(fov / 2 * Math.PI / 180), 0);
+      this.camera.lookAt(0, 0, 0);
+
+      this.scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+      const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+      sun.position.set(-5, 15, 6);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.radius = 4;
+      sun.shadow.bias = -0.0004;
+      Object.assign(sun.shadow.camera, { left: -13, right: 13, top: 13, bottom: -13, near: 1, far: 40 });
+      this.scene.add(sun);
+
+      const felt = feltTexture();
+      const floor = new THREE.Mesh(new THREE.PlaneGeometry(FLOOR_W + 2 * RIM, FLOOR_D + 2 * RIM),
+        new THREE.MeshStandardMaterial({ map: felt, bumpMap: felt, bumpScale: 0.9, roughness: 1, metalness: 0 }));
+      floor.rotation.x = -Math.PI / 2;
+      floor.receiveShadow = true;
+      this.scene.add(floor);
+
+      // soft darkening towards the rim
+      const vc = document.createElement('canvas');
+      vc.width = vc.height = 256;
+      const vg = vc.getContext('2d');
+      const vr = vg.createRadialGradient(128, 128, 60, 128, 128, 182);
+      vr.addColorStop(0, 'rgba(0,0,0,0)'); vr.addColorStop(1, 'rgba(0,0,0,.55)');
+      vg.fillStyle = vr; vg.fillRect(0, 0, 256, 256);
+      const vignette = new THREE.Mesh(new THREE.PlaneGeometry(FLOOR_W, FLOOR_D),
+        new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(vc), transparent: true, depthWrite: false }));
+      vignette.rotation.x = -Math.PI / 2;
+      vignette.position.y = 0.01;
+      this.scene.add(vignette);
+
+      // the raised wooden rim: the camera looks down into it, so the tray reads as sunk into the screen
+      const rimMat = new THREE.MeshPhysicalMaterial({ map: woodTexture(), normalMap: woodNormalTexture(), normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.85, metalness: 0, clearcoat: 0, clearcoatRoughness: 0.6 });
+      // texture coordinates are worked out per pixel from the position on the frame: the grain runs along each
+      // side and every face gets world-sized UVs, so nothing is stretched (per-vertex UVs can't do that on a frame)
+      rimMat.onBeforeCompile = shader => {
+        shader.vertexShader = shader.vertexShader
+          .replace('void main() {', 'varying vec3 vRimPos;\nvoid main() {')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRimPos = position;');
+        const uvCode = `
+          vec3 rimN = normalize(cross(dFdx(vRimPos), dFdy(vRimPos)));
+          bool rimFlat = abs(rimN.y) > 0.5;
+          float rimOx = abs(vRimPos.x) - ${(FLOOR_W / 2).toFixed(3)};
+          float rimOz = abs(vRimPos.z) - ${(FLOOR_D / 2).toFixed(3)};
+          vec2 rimUv = rimOx > rimOz
+            ? vec2(vRimPos.z / ${WOOD_U.toFixed(3)}, (rimFlat ? rimOx : vRimPos.y) / ${WOOD_V.toFixed(3)})
+            : vec2(vRimPos.x / ${WOOD_U.toFixed(3)}, (rimFlat ? rimOz : vRimPos.y) / ${WOOD_V.toFixed(3)});`;
+        const chunk = name => THREE.ShaderChunk[name].replace(/vUv/g, 'rimUv');
+        shader.fragmentShader = shader.fragmentShader
+          .replace('void main() {', 'varying vec3 vRimPos;\nvoid main() {' + uvCode)
+          .replace('#include <map_fragment>', chunk('map_fragment'))
+          .replace('#include <normal_fragment_maps>', chunk('normal_fragment_maps'));
+        // the helper that builds the normal from the map also reads the UVs, so it needs them as a parameter
+        shader.fragmentShader = shader.fragmentShader.replace('#include <normalmap_pars_fragment>',
+          THREE.ShaderChunk.normalmap_pars_fragment
+            .replace('perturbNormal2Arb( vec3 eye_pos, vec3 surf_norm, vec3 mapN, float faceDirection )', 'perturbNormal2Arb( vec3 eye_pos, vec3 surf_norm, vec3 mapN, float faceDirection, vec2 rimUv )')
+            .replace(/vUv/g, 'rimUv'));
+        shader.fragmentShader = shader.fragmentShader.replace('perturbNormal2Arb( -vViewPosition, normal, mapN, faceDirection )', 'perturbNormal2Arb( -vViewPosition, normal, mapN, faceDirection, rimUv )');
+      };
+      const rim = new THREE.Mesh(rimGeometry(), rimMat);
+      rim.castShadow = rim.receiveShadow = true;
+      this.scene.add(rim);
+
+      this.ready = RAPIER.then(R => this.initPhysics(R));
+      new ResizeObserver(() => this.resize()).observe(el);
+      this.resize();
+    }
+
+    initPhysics(R) {
+      this.R = R;
+      const w = this.world = new R.World({ x: 0, y: -G, z: 0 });
+      w.timestep = STEP;
+      w.lengthUnit = DS;   // contact tolerances relative to the die size
+      // the tray: a felt floor and a wooden rim (with a lid, so nothing can leave)
+      const fixed = (hx, hy, hz, x, y, z, friction, restitution) =>
+        w.createCollider(R.ColliderDesc.cuboid(hx, hy, hz).setTranslation(x, y, z)
+          .setFriction(friction).setRestitution(restitution));
+      const hw = FLOOR_W / 2, hd = FLOOR_D / 2;
+      fixed(hw + 1, 1, hd + 1, 0, -1, 0, 0.6, 0.2);                // felt
+      fixed(0.5, 10, hd + 1, -hw - 0.5, 10, 0, 0.2, 0.7);          // rim
+      fixed(0.5, 10, hd + 1, hw + 0.5, 10, 0, 0.2, 0.7);
+      fixed(hw + 1, 10, 0.5, 0, 10, -hd - 0.5, 0.2, 0.7);
+      fixed(hw + 1, 10, 0.5, 0, 10, hd + 0.5, 0.2, 0.7);
+      fixed(hw + 1, 0.5, hd + 1, 0, 20.5, 0, 0.2, 0.7);            // lid
+    }
+
+    resize() {
+      const w = this.el.clientWidth;
+      if (!w || w === this.lastWidth) return;
+      this.lastWidth = w;
+      this.renderer.setSize(w, Math.round(w * VIEW_D / VIEW_W), false);
+      this.render();
+    }
+
+    render() { this.renderer.render(this.scene, this.camera); }
+
+    updateHint() { this.el.classList.toggle('empty', this.items.size === 0); }
+
+    makeDie(d, sides) {
+      const R = this.R, vals = FACE_VALUES[sides === 3 ? 3 : 6];
+      const mats = vals.map(v => new THREE.MeshStandardMaterial({ map: faceTexture(v), roughness: 0.4, metalness: 0 }));
+      const mesh = new THREE.Mesh(DIE_GEO, mats);
+      mesh.castShadow = true;
+      // a plain sharp-edged box (the rounded edges are only visual); friction and bounce are averaged with
+      // what it hits: felt 0.4 / 0.25, rim 0.2 / 0.5, another die 0.2 / 0.3
+      const body = this.world.createRigidBody(R.RigidBodyDesc.dynamic()
+        .setCcdEnabled(true).setLinearDamping(0.1).setAngularDamping(0.3));
+      this.world.createCollider(R.ColliderDesc.cuboid(DS / 2, DS / 2, DS / 2)
+        .setDensity(1).setFriction(0.2).setRestitution(0.3), body);
+      this.scene.add(mesh);
+      const item = { mesh, body, vals, rest: 0 };
+      this.items.set(d, item);
+      return item;
+    }
+
+    remove(d) {
+      const it = this.items.get(d);
+      if (!it) return;
+      this.scene.remove(it.mesh);
+      this.world.removeRigidBody(it.body);
+      this.items.delete(d);
+      this.updateHint();
+      this.render();
+    }
+
+    clear() {
+      this.sortToken++;
+      [...this.items.keys()].forEach(d => this.remove(d));
+      this.updateHint();
+    }
+
+    // throw the dice in from the left; resolves once they have all come to rest
+    async throwDice(list, sides, keep = false) {
+      if (!keep) this.clear();   // keep = true: throw these in without disturbing the dice already on the tray
+      if (!list.length) return;
+      await this.ready;
+      const hw = FLOOR_W / 2, hd = FLOOR_D / 2;
+      // a handful held over the left of the tray: a jittered grid, spaced so no two dice start touching.
+      // A big handful is spread wider rather than piled higher, and every die leaves at its own speed and
+      // angle, so the handful fans out over the tray instead of landing as one heap.
+      const gap = DS * 1.85, n = list.length;
+      const rows = Math.min(7, Math.ceil(Math.sqrt(n)));
+      const cols = Math.min(5, Math.ceil(n / rows));
+      const cz = (Math.random() * 2 - 1) * Math.max(0, hd - 0.8 - (rows - 1) / 2 * gap);
+      const aim = (Math.random() - 0.5) * 0.4 * (1 - rows / 8);   // a small handful goes roughly one way
+      list.forEach((d, i) => {
+        const { body } = this.makeDie(d, sides);
+        const l = Math.floor(i / (rows * cols)), c = Math.floor(i / rows) % cols, r = i % rows;
+        const j = () => (Math.random() - 0.5) * 0.08;
+        const z = cz + (r - (rows - 1) / 2) * gap + j();
+        body.setTranslation({ x: -hw + 1.2 + c * gap + j(), y: 2.2 + l * gap + j(), z }, true);
+        body.setRotation(randomQuat(), true);
+        const sp = 22 + Math.random() * 50, ang = aim - z * 0.04 + (Math.random() - 0.5) * 0.8;
+        body.setLinvel({ x: Math.cos(ang) * sp, y: 9 - Math.random() * 12, z: Math.sin(ang) * sp }, true);
+        body.setAngvel({ x: (Math.random() - 0.5) * 60, y: (Math.random() - 0.5) * 60, z: (Math.random() - 0.5) * 60 }, true);
+      });
+      this.updateHint();
+      await new Promise(resolve => { this.onSettled = resolve; this.start(); });
+      list.forEach(d => { const it = this.items.get(d); d.v = it.vals[upFace(it.mesh.quaternion).k]; });
+    }
+
+    // pin every die on the tray in place (or let them go again), so a reroll of a few dice can bounce off the
+    // others without knocking them over or changing what they show
+    freeze(on) {
+      const T = this.R.RigidBodyType;
+      this.items.forEach(it => {
+        it.body.setBodyType(on ? T.Fixed : T.Dynamic, false);
+        if (!on) it.body.sleep();
+      });
+    }
+
+    // a bonus die that lands showing a 6 (sustained hits)
+    dropBonus(d) {
+      if (!this.world) return;
+      const others = [...this.items.values()].map(o => o.mesh);
+      const { body, mesh } = this.makeDie(d, 6);
+      // -x face (the 6) up, then spin it about the vertical axis
+      const q = new THREE.Quaternion().setFromAxisAngle(UP, Math.random() * 6.28)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -Math.PI / 2));
+      const hw = FLOOR_W / 2 - 1.5, hd = FLOOR_D / 2 - 1.5;
+      const p = this.freeSpot((Math.random() * 2 - 1) * hw, (Math.random() * 2 - 1) * hd, q, others);
+      mesh.position.set(p.x, DS / 2 + 0.6, p.z);
+      mesh.quaternion.copy(q);
+      body.setTranslation(mesh.position, true);
+      body.setRotation(q, true);
+      d.v = 6;
+      this.updateHint();
+      this.start();
+    }
+
+    // line the dice up in rows, highest to lowest, sliding them across the felt
+    sortDice(list) {
+      const sorted = list.filter(d => this.items.has(d)).sort((a, b) => b.v - a.v);
+      if (!sorted.length) return Promise.resolve();
+      const sp = DS * 1.3;
+      const cols = Math.max(1, Math.min(sorted.length, Math.floor((FLOOR_W - 1.5) / sp)));
+      const rows = Math.ceil(sorted.length / cols);
+      const from = [], targets = [], quats = [];
+      sorted.forEach((d, i) => {
+        const it = this.items.get(d), m = it.mesh;
+        const q = m.quaternion.clone();
+        // which face is up, and how is the die turned about the vertical?
+        const best = upFace(q).k;
+        const perp = FACE_AXES[(((best >> 1) + 1) % 3) * 2].clone().applyQuaternion(q);
+        const ang = Math.atan2(perp.x, perp.z);
+        const delta = Math.round(ang / (Math.PI / 2)) * (Math.PI / 2) - ang;
+        quats.push(new THREE.Quaternion().setFromAxisAngle(UP, delta).multiply(flattened(q)));
+        from.push({ p: m.position.clone(), q });
+        const r = Math.floor(i / cols), c = i % cols;
+        targets.push(new THREE.Vector3((c - (cols - 1) / 2) * sp, DS / 2, (r - (rows - 1) / 2) * sp));
+      });
+      const token = ++this.sortToken, t0 = performance.now(), dur = 700;
+      return new Promise(resolve => {
+        const step = now => {
+          if (token !== this.sortToken) { resolve(); return; }
+          const t = Math.min(1, (now - t0) / dur);
+          const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          sorted.forEach((d, i) => {
+            const it = this.items.get(d);
+            if (!it) return;
+            it.mesh.position.lerpVectors(from[i].p, targets[i], e);
+            it.mesh.position.y += Math.sin(Math.PI * e) * 0.8;
+            it.mesh.quaternion.copy(from[i].q).slerp(quats[i], e);
+          });
+          this.render();
+          if (t < 1) { requestAnimationFrame(step); return; }
+          sorted.forEach((d, i) => {
+            const it = this.items.get(d);
+            if (it) this.place(it, targets[i], quats[i]);
+          });
+          resolve();
+        };
+        requestAnimationFrame(step);
+      });
+    }
+
+    // colour the dice: crit = gold, miss = dark, bonus = orange glow
+    restyle(list, clsFn) {
+      list.forEach(d => {
+        const it = this.items.get(d);
+        if (!it) return;
+        const cls = clsFn(d);
+        it.mesh.material.forEach(m => {
+          m.color.set(cls.includes('crit') ? 0xffc233 : cls.includes('miss') ? 0x555a66 : 0xffffff);
+          m.emissive.set(cls.includes('bonus') ? 0x9a3418 : 0x000000);
+        });
+      });
+      this.render();
+    }
+
+    // put a die exactly here, at rest and asleep
+    place(it, p, q) {
+      const b = it.body;
+      b.setTranslation(p, false);
+      b.setRotation(q, false);
+      b.setLinvel({ x: 0, y: 0, z: 0 }, false);
+      b.setAngvel({ x: 0, y: 0, z: 0 }, false);
+      b.sleep();
+      it.mesh.position.copy(p);
+      it.mesh.quaternion.copy(q);
+    }
+
+    // the spot on the felt nearest to (x, z) where a flat die turned as `q` keeps at least CLEAR from
+    // every die in `others` (anything with a position and quaternion)
+    freeSpot(x, z, q, others) {
+      const hw = FLOOR_W / 2 - DS * 0.75, hd = FLOOR_D / 2 - DS * 0.75;
+      const me = { position: new THREE.Vector3(), quaternion: q };
+      const ok = (px, pz) => {
+        if (Math.abs(px) > hw || Math.abs(pz) > hd) return false;
+        me.position.set(px, 0, pz);
+        return others.every(o => {
+          const dist = Math.hypot(o.position.x - px, o.position.z - pz);
+          return dist >= DS * Math.SQRT2 + CLEAR || (dist >= DS + CLEAR && footprintGap(o, me) >= CLEAR);
+        });
+      };
+      for (let r = 0; r < FLOOR_W; r += r < 2 ? 0.04 : 0.15) {
+        const n = Math.max(1, Math.ceil(2 * Math.PI * r / 0.1)), a0 = Math.random() * 6.28;
+        for (let i = 0; i < n; i++) {
+          const px = x + Math.cos(a0 + i / n * 6.28) * r, pz = z + Math.sin(a0 + i / n * 6.28) * r;
+          if (ok(px, pz)) return { x: px, z: pz };
+        }
+      }
+      return { x: Math.max(-hw, Math.min(hw, x)), z: Math.max(-hd, Math.min(hd, z)) };
+    }
+
+    // the one clean-up pass: every die that is not lying flat on the felt and at rest (leaning, lying on
+    // another, or still moving) gets the nearest free spot, flat on the face it shows; dice that merely
+    // touch side by side stay where they are. Returns the moves for glide()
+    tidy() {
+      const its = [...this.items.values()], kept = [];
+      let moved = [];
+      its.forEach(it => {
+        const m = it.mesh;
+        const clean = it.rest >= REST_TIME && upFace(m.quaternion).y >= FLAT && m.position.y < DS / 2 + 0.02 &&
+          Math.abs(m.position.x) < FLOOR_W / 2 && Math.abs(m.position.z) < FLOOR_D / 2;
+        (clean ? kept : moved).push(it);
+      });
+      const taken = kept.map(o => o.mesh);
+      moved = moved.map(it => {
+        const q = flattened(it.mesh.quaternion);
+        const p = this.freeSpot(it.mesh.position.x, it.mesh.position.z, q, taken);
+        const to = { position: new THREE.Vector3(p.x, DS / 2, p.z), quaternion: q };
+        taken.push(to);
+        return { it, to, from: { p: it.mesh.position.clone(), q: it.mesh.quaternion.clone() } };
+      });
+      this.redropped = moved.length;
+      return moved;
+    }
+
+    // move the tidied dice to their spots in view: a leaning die tips over flat and one lying on another
+    // hops down beside it
+    glide(moves) {
+      if (!moves.length) return Promise.resolve();
+      moves.forEach(m => {
+        const dist = m.from.p.distanceTo(m.to.position);
+        m.dur = 160 + 120 * Math.sqrt(dist);
+        m.hop = Math.min(0.8, Math.max(0, dist - 0.3) * 0.35);
+      });
+      const token = this.sortToken, t0 = performance.now();
+      return new Promise(resolve => {
+        const step = now => {
+          if (token !== this.sortToken) { resolve(); return; }
+          let busy = false;
+          moves.forEach(m => {
+            const t = Math.min(1, (now - t0) / m.dur), e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            if (t < 1) busy = true;
+            m.it.mesh.position.lerpVectors(m.from.p, m.to.position, e);
+            m.it.mesh.position.y += Math.sin(Math.PI * e) * m.hop;
+            m.it.mesh.quaternion.copy(m.from.q).slerp(m.to.quaternion, e);
+          });
+          this.render();
+          if (busy) { requestAnimationFrame(step); return; }
+          moves.forEach(m => this.place(m.it, m.to.position, m.to.quaternion));
+          resolve();
+        };
+        requestAnimationFrame(step);
+      });
+    }
+
+    // run the simulation until every die is at rest, then tidy up and report back
+    start() {
+      this.simTime = 0;
+      this.items.forEach(it => { it.rest = 0; });
+      if (this.running) return;
+      this.running = true;
+      let last = performance.now(), acc = 0;
+      const tick = now => {
+        acc += Math.min((now - last) / 1000, 0.1) / PACE;
+        last = now;
+        // catch up in fixed steps; if far behind (slow machine, hidden tab) slow down rather than spiral
+        let n = 0;
+        while (acc >= STEP && n < 8) { this.world.step(); acc -= STEP; n++; }
+        if (n === 8) acc = 0;
+        const dt = n * STEP;
+        this.simTime += dt;
+
+        let allRest = true;
+        this.items.forEach(it => {
+          const b = it.body, p = b.translation(), q = b.rotation(), v = b.linvel(), w = b.angvel();
+          it.mesh.position.set(p.x, p.y, p.z);
+          it.mesh.quaternion.set(q.x, q.y, q.z, q.w);
+          const slow = b.isSleeping() || (Math.hypot(v.x, v.y, v.z) < REST_LIN && Math.hypot(w.x, w.y, w.z) < REST_ANG);
+          it.rest = slow ? it.rest + dt : 0;
+          if (it.rest < REST_TIME) allRest = false;
+          else if (!b.isSleeping() && p.y < DS / 2 + 0.02 && upFace(it.mesh.quaternion).y >= FLAT) b.sleep();
+        });
+        this.render();
+
+        if (!(allRest && this.simTime > 0.3) && this.simTime < MAX_ROLL) { requestAnimationFrame(tick); return; }
+        this.items.forEach(it => it.body.sleep());
+        this.glide(this.tidy()).then(() => {
+          this.render();
+          this.running = false;
+          if (this.onSettled) { const f = this.onSettled; this.onSettled = null; f(); }
+          else if (this.afterRest) { const f = this.afterRest; this.afterRest = null; f(); }
+        });
+      };
+      requestAnimationFrame(tick);
+    }
+  }
+
+  let hitTray = new Tray($('dice'));
+  let woundTray = null;   // created the first time the wound phase is shown
+
+  // ---------- setup controls ----------
+  SIDES.forEach(s => {
+    const b = document.createElement('button');
+    b.textContent = 'd' + s;
+    b.dataset.s = s;
+    b.onclick = () => { sides = s; renderControls(); };
+    $('types').appendChild(b);
+  });
+
+  function buildTargets(id, set) {
+    for (let t = 2; t <= 6; t++) {
+      const b = document.createElement('button');
+      b.textContent = t + '+';
+      b.dataset.t = t;
+      b.onclick = () => { set(t); renderControls(); };
+      $(id).appendChild(b);
+    }
+  }
+  buildTargets('hitOn', t => { hitOn = t; drawHit(); });
+  buildTargets('woundOn', t => { woundOn = t; drawWound(); });
+
+  function renderControls() {
+    [...$('types').children].forEach(b => b.classList.toggle('sel', +b.dataset.s === sides));
+    [...$('hitOn').children].forEach(b => b.classList.toggle('sel', +b.dataset.t === hitOn));
+    [...$('woundOn').children].forEach(b => b.classList.toggle('sel', +b.dataset.t === woundOn));
+    if (document.activeElement !== $('count')) $('count').value = count;
+  }
+  const MAX_DICE = 60;
+  const setCount = n => { count = Math.max(1, Math.min(MAX_DICE, n || 1)); $('count').value = count; };
+  $('minus').onclick = () => setCount(count - 1);
+  $('plus').onclick = () => setCount(count + 1);
+  // typing: take any valid number as you type, and tidy the field when you leave it
+  $('count').oninput = () => {
+    const n = parseInt($('count').value, 10);
+    if (n >= 1) count = Math.min(MAX_DICE, n);
+  };
+  $('count').onchange = () => setCount(parseInt($('count').value, 10));
+  $('count').onfocus = () => $('count').select();
+  $('count').onkeydown = e => {
+    if (e.key === 'Enter') { setCount(parseInt($('count').value, 10)); $('count').blur(); roll(); }
+  };
+
+  // ---------- phase switching ----------
+  function showPhase(n) {
+    phase = n;
+    $('phase1').hidden = n !== 1;
+    $('phase2').hidden = n !== 2;
+    $('dice').hidden = n !== 1;
+    $('woundDice').hidden = n !== 2;
+    $('pill1').classList.toggle('on', n === 1);
+    $('pill2').classList.toggle('on', n === 2);
+    if (n === 2 && !woundTray) woundTray = new Tray($('woundDice'));
+    (n === 1 ? hitTray : woundTray).resize();
+  }
+
+  // ---------- hit phase ----------
+  const hitClass = d =>
+    (success(d.v, hitOn) ? (d.v === 6 ? 'crit' : '') : 'miss') + (d.bonus ? ' bonus' : '');
+
+  function drawHit() {
+    const hits = dice.filter(d => success(d.v, hitOn)).length;
+    const can = rolled && !rolling;
+    if (can) hitTray.restyle(dice, hitClass);
+    $('total').innerHTML = can
+      ? `${hits} hit${hits === 1 ? '' : 's'}<small>hit on ${hitOn}+</small>`
+      : (rolling ? '<small>rolling…</small>' : '');
+
+    $('lethal').innerHTML = lethal.length ? '' : '<span class="none">No lethal hits yet</span>';
+    lethal.forEach(v => $('lethal').appendChild(mkFlatDie(v)));
+    $('lethalCount').textContent = lethal.length;
+
+    $('roll').disabled = rolling;
+    ['lethalBtn', 'sustainedBtn', 'bothBtn', 'toWound'].forEach(id => $(id).disabled = !can);
+    const ones = dice.filter(isRerollOne).length, misses = dice.filter(isRerollMiss).length;
+    $('rerollBtn').disabled = !can || !ones;
+    $('rerollBtn').textContent = can && ones ? `Reroll 1s (${ones})` : 'Reroll 1s';
+    $('rerollMissBtn').disabled = !can || !misses;
+    $('rerollMissBtn').textContent = can && misses ? `Reroll misses (${misses})` : 'Reroll misses';
+  }
+
+  async function roll() {
+    if (rolling) return;
+    rolling = true; rolled = false;
+    lethal = [];
+    dice = Array.from({ length: count }, () => ({ v: 0, bonus: false, used: false }));
+    drawHit();
+    await hitTray.throwDice(dice, sides);
+    await hitTray.sortDice(dice);
+    rolling = false; rolled = true;
+    drawHit();
+  }
+
+  // Rerolls: the chosen dice are thrown again, once each. The other dice stay where they are.
+  const isRerollOne = d => d.v === 1 && !d.rerolled;
+  const isRerollMiss = d => d.v > 0 && !success(d.v, hitOn) && !d.rerolled;   // everything that missed (this includes the 1s)
+
+  async function rerollIn(tray, list, sides, pick, redraw) {
+    const chosen = list.filter(pick);
+    if (!chosen.length) return;
+    rolling = true;
+    chosen.forEach(d => { d.rerolled = true; tray.remove(d); d.v = 0; });
+    redraw();
+    tray.freeze(true);
+    await tray.throwDice(chosen, sides, true);
+    tray.freeze(false);
+    await tray.sortDice(list);
+    rolling = false;
+    redraw();
+  }
+  async function rerollDice(pick) {
+    if (rolling || !rolled) return;
+    await rerollIn(hitTray, dice, sides, pick, drawHit);
+  }
+  const rerollOnes = () => rerollDice(isRerollOne);
+  const rerollMisses = () => rerollDice(isRerollMiss);
+
+  const unspentSixes = () => dice.filter(d => d.v === 6 && !d.used);
+
+  // add one bonus die to the tray for each 6
+  function addBonus(n) {
+    for (let i = 0; i < n; i++) {
+      const b = { v: 6, bonus: true, used: true };
+      dice.push(b);
+      hitTray.dropBonus(b);
+    }
+    hitTray.afterRest = () => hitTray.sortDice(dice);
+  }
+
+  // Lethal hits: move every unspent 6 out of the tray into the Lethal hits card
+  function lethalHits() {
+    const sixes = unspentSixes();
+    if (!sixes.length) return;
+    sixes.forEach(d => { lethal.push(d.v); hitTray.remove(d); });
+    dice = dice.filter(d => !sixes.includes(d));
+    hitTray.sortDice(dice);
+    drawHit();
+  }
+
+  // Sustained hits: every unspent 6 adds one extra die (a bonus hit, which doesn't chain)
+  function sustainedHits() {
+    const sixes = unspentSixes();
+    if (!sixes.length) return;
+    sixes.forEach(d => d.used = true);
+    addBonus(sixes.length);
+    drawHit();
+  }
+
+  // Both: every unspent 6 goes to the Lethal hits card AND adds one extra die
+  function lethalAndSustained() {
+    const sixes = unspentSixes();
+    if (!sixes.length) return;
+    sixes.forEach(d => { lethal.push(d.v); hitTray.remove(d); });
+    dice = dice.filter(d => !sixes.includes(d));
+    addBonus(sixes.length);
+    drawHit();
+  }
+
+  // ---------- wound phase ----------
+  const woundClass = d => success(d.v, woundOn) ? (d.v === 6 ? 'crit' : '') : 'miss';
+
+  function drawWound() {
+    const auto = lethal.length;
+    $('woundSummary').textContent =
+      `${hitsCarried} hit${hitsCarried === 1 ? '' : 's'} to roll` +
+      (auto ? ` · ${auto} lethal hit${auto === 1 ? '' : 's'} wound automatically` : '');
+
+    if (woundRolled && !rolling) {
+      woundTray.restyle(woundDice, woundClass);
+      const rolledWounds = woundDice.filter(d => success(d.v, woundOn)).length;
+      const total = rolledWounds + auto;
+      $('woundTotal').innerHTML =
+        `${total} wound${total === 1 ? '' : 's'}<small>${rolledWounds} rolled on ${woundOn}+` +
+        (auto ? ` + ${auto} lethal` : '') + `</small>`;
+    } else {
+      $('woundTotal').innerHTML = rolling ? '<small>rolling…</small>' : '';
+    }
+    ['rollWound', 'back', 'again'].forEach(id => $(id).disabled = rolling);
+    const can = woundRolled && !rolling;
+    const ones = woundDice.filter(isWoundOne).length, misses = woundDice.filter(isWoundMiss).length;
+    $('rerollWoundOnesBtn').disabled = !can || !ones;
+    $('rerollWoundOnesBtn').textContent = can && ones ? `Reroll 1s (${ones})` : 'Reroll 1s';
+    $('rerollWoundMissBtn').disabled = !can || !misses;
+    $('rerollWoundMissBtn').textContent = can && misses ? `Reroll misses (${misses})` : 'Reroll misses';
+  }
+
+  // wound rerolls work like the hit ones: the chosen dice are thrown again, once each
+  const isWoundOne = d => d.v === 1 && !d.rerolled;
+  const isWoundMiss = d => d.v > 0 && !success(d.v, woundOn) && !d.rerolled;
+  async function rerollWoundDice(pick) {
+    if (rolling || !woundRolled) return;
+    await rerollIn(woundTray, woundDice, 6, pick, drawWound);
+  }
+
+  async function rollWounds() {
+    if (rolling) return;
+    rolling = true; woundRolled = false;
+    woundDice = Array.from({ length: hitsCarried }, () => ({ v: 0 }));
+    drawWound();
+    await woundTray.throwDice(woundDice, 6);
+    await woundTray.sortDice(woundDice);
+    rolling = false; woundRolled = true;
+    drawWound();
+  }
+
+  function toWound() {
+    if (!rolled || rolling) return;
+    hitsCarried = dice.filter(d => success(d.v, hitOn)).length;
+    woundDice = [];
+    woundRolled = false;
+    showPhase(2);
+    woundTray.clear();
+    drawWound();
+  }
+
+  function newAttack() {
+    dice = []; lethal = []; rolled = false;
+    woundDice = []; woundRolled = false;
+    hitTray.clear();
+    if (woundTray) woundTray.clear();
+    showPhase(1);
+    drawHit();
+  }
+
+  // ---------- wiring ----------
+  $('roll').onclick = roll;
+  $('rerollBtn').onclick = rerollOnes;
+  $('rerollMissBtn').onclick = rerollMisses;
+  $('rerollWoundOnesBtn').onclick = () => rerollWoundDice(isWoundOne);
+  $('rerollWoundMissBtn').onclick = () => rerollWoundDice(isWoundMiss);
+  $('lethalBtn').onclick = lethalHits;
+  $('sustainedBtn').onclick = sustainedHits;
+  $('bothBtn').onclick = lethalAndSustained;
+  $('toWound').onclick = toWound;
+  $('rollWound').onclick = rollWounds;
+  $('back').onclick = () => { showPhase(1); drawHit(); };
+  $('again').onclick = newAttack;
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !['BUTTON', 'INPUT'].includes(document.activeElement.tagName)) {
+      e.preventDefault();
+      phase === 1 ? roll() : rollWounds();
+    }
+  });
+
+  renderControls();
+  drawHit();
+</script>
+</body>
+</html>
