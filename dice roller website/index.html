@@ -143,14 +143,16 @@
     <main class="stage">
       <div class="tray empty" id="dice" data-empty="Roll to throw the dice"></div>
       <div class="tray empty" id="woundDice" data-empty="Roll to throw the dice" hidden></div>
+      <div class="tray empty" id="saveDice" data-empty="Roll to throw the dice" hidden></div>
     </main>
 
     <!-- ============ CONTROLS (right) ============ -->
     <aside class="panel">
 
       <div class="phases">
-        <div id="pill1" class="on">1 · Hit phase</div>
-        <div id="pill2">2 · Wound phase</div>
+        <div id="pill1" class="on">1 · Hit</div>
+        <div id="pill2">2 · Wound</div>
+        <div id="pill3">3 · Save</div>
       </div>
 
       <!-- HIT PHASE -->
@@ -220,9 +222,31 @@
           <div id="devastating"></div>
         </div>
 
+        <button class="big" id="toSave" disabled>Continue to save phase →</button>
+
         <div class="actions">
           <button id="back">← Back to hit phase</button>
           <button id="again">New attack</button>
+        </div>
+      </section>
+
+      <!-- SAVE PHASE -->
+      <section id="phase3" hidden>
+        <div class="card">
+          <p class="hint" id="saveSummary"></p>
+          <div class="field">
+            <span class="label">Save on</span>
+            <div class="row" id="saveOn"></div>
+          </div>
+        </div>
+
+        <button class="big" id="rollSave">Roll to save</button>
+
+        <div class="card"><div class="total" id="saveTotal"></div></div>
+
+        <div class="actions">
+          <button id="backSave">← Back to wound phase</button>
+          <button id="againSave">New attack</button>
         </div>
       </section>
     </aside>
@@ -235,6 +259,7 @@
   // dice: {v, bonus, used}; "used" means this 6 was already spent on a lethal/sustained hit
   let dice = [], lethal = [], rolled = false, rolling = false;
   let woundDice = [], woundRolled = false, hitsCarried = 0, devastating = [];
+  let saveDice = [], saveRolled = false, toSaveCount = 0, saveOn = 4;
   const $ = id => document.getElementById(id);
 
   // an unmodified 1 always fails, an unmodified 6 always succeeds
@@ -922,6 +947,7 @@
 
   let hitTray = new Tray($('dice'));
   let woundTray = null;   // created the first time the wound phase is shown
+  let saveTray = null;    // ... and the same for the save phase
 
   // ---------- setup controls ----------
   SIDES.forEach(s => {
@@ -943,11 +969,13 @@
   }
   buildTargets('hitOn', t => { hitOn = t; drawHit(); });
   buildTargets('woundOn', t => { woundOn = t; drawWound(); });
+  buildTargets('saveOn', t => { saveOn = t; drawSave(); });
 
   function renderControls() {
     [...$('types').children].forEach(b => b.classList.toggle('sel', +b.dataset.s === sides));
     [...$('hitOn').children].forEach(b => b.classList.toggle('sel', +b.dataset.t === hitOn));
     [...$('woundOn').children].forEach(b => b.classList.toggle('sel', +b.dataset.t === woundOn));
+    [...$('saveOn').children].forEach(b => b.classList.toggle('sel', +b.dataset.t === saveOn));
     if (document.activeElement !== $('count')) $('count').value = count;
   }
   const MAX_DICE = 60;
@@ -968,14 +996,16 @@
   // ---------- phase switching ----------
   function showPhase(n) {
     phase = n;
-    $('phase1').hidden = n !== 1;
-    $('phase2').hidden = n !== 2;
+    [1, 2, 3].forEach(i => {
+      $('phase' + i).hidden = n !== i;
+      $('pill' + i).classList.toggle('on', n === i);
+    });
     $('dice').hidden = n !== 1;
     $('woundDice').hidden = n !== 2;
-    $('pill1').classList.toggle('on', n === 1);
-    $('pill2').classList.toggle('on', n === 2);
+    $('saveDice').hidden = n !== 3;
     if (n === 2 && !woundTray) woundTray = new Tray($('woundDice'));
-    (n === 1 ? hitTray : woundTray).resize();
+    if (n === 3 && !saveTray) saveTray = new Tray($('saveDice'));
+    (n === 1 ? hitTray : n === 2 ? woundTray : saveTray).resize();
   }
 
   // ---------- hit phase ----------
@@ -1109,6 +1139,7 @@
     $('devCount').textContent = devastating.length;
     const can = woundRolled && !rolling;
     const sixes = woundDice.filter(d => d.v === 6).length;
+    $('toSave').disabled = !can;
     $('devBtn').disabled = !can || !sixes;
     $('devBtn').textContent = can && sixes ? `Devastating wounds (${sixes})` : 'Devastating wounds';
     const ones = woundDice.filter(isWoundOne).length, misses = woundDice.filter(isWoundMiss).length;
@@ -1164,10 +1195,58 @@
   function newAttack() {
     dice = []; lethal = []; rolled = false;
     woundDice = []; devastating = []; woundRolled = false;
+    saveDice = []; saveRolled = false;
     hitTray.clear();
     if (woundTray) woundTray.clear();
+    if (saveTray) saveTray.clear();
     showPhase(1);
     drawHit();
+  }
+
+  // ---------- save phase ----------
+  // a save passes on 2+..6+ (an unmodified 1 always fails)
+  const saveClass = d => success(d.v, saveOn) ? (d.v === 6 ? 'crit' : '') : 'miss';
+
+  function drawSave() {
+    const dev = devastating.length;
+    $('saveSummary').textContent =
+      `${toSaveCount} wound${toSaveCount === 1 ? '' : 's'} to save` +
+      (dev ? ` · ${dev} devastating (no save)` : '');
+    if (saveRolled && !rolling) {
+      saveTray.restyle(saveDice, saveClass);
+      const saved = saveDice.filter(d => success(d.v, saveOn)).length;
+      const failed = saveDice.length - saved;
+      const through = failed + dev;
+      $('saveTotal').innerHTML =
+        `${through} unsaved wound${through === 1 ? '' : 's'}<small>${saved} saved · ${failed} failed on ${saveOn}+` +
+        (dev ? ` + ${dev} devastating` : '') + `</small>`;
+    } else {
+      $('saveTotal').innerHTML = rolling ? '<small>rolling…</small>' : '';
+    }
+    $('rollSave').disabled = rolling || saveRolled;   // one save roll per attack
+    ['backSave', 'againSave'].forEach(id => $(id).disabled = rolling);
+  }
+
+  async function rollSaves() {
+    if (rolling || saveRolled) return;
+    rolling = true; saveRolled = false;
+    saveDice = Array.from({ length: toSaveCount }, () => ({ v: 0 }));
+    drawSave();
+    await saveTray.throwDice(saveDice, 6);
+    await saveTray.sortDice(saveDice);
+    rolling = false; saveRolled = true;
+    drawSave();
+  }
+
+  // every wound that went through (rolled successes plus lethal hits) can be saved; devastating wounds can't
+  function toSave() {
+    if (!woundRolled || rolling) return;
+    toSaveCount = woundDice.filter(d => success(d.v, woundOn)).length + lethal.length;
+    saveDice = [];
+    saveRolled = false;
+    showPhase(3);
+    saveTray.clear();
+    drawSave();
   }
 
   // ---------- wiring ----------
@@ -1184,12 +1263,16 @@
   $('rollWound').onclick = rollWounds;
   $('back').onclick = () => { showPhase(1); drawHit(); };
   $('again').onclick = newAttack;
+  $('toSave').onclick = toSave;
+  $('rollSave').onclick = rollSaves;
+  $('againSave').onclick = newAttack;
+  $('backSave').onclick = () => { showPhase(2); drawWound(); };
   $('newHit').onclick = () => { if (!rolling) newAttack(); };
 
   document.addEventListener('keydown', e => {
     if (e.code === 'Space' && !['BUTTON', 'INPUT'].includes(document.activeElement.tagName)) {
       e.preventDefault();
-      phase === 1 ? roll() : rollWounds();
+      phase === 1 ? roll() : phase === 2 ? rollWounds() : rollSaves();
     }
   });
 
